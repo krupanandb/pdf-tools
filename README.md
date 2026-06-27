@@ -6,6 +6,16 @@ A local web app that does everything the popular online PDF sites do — **merge
 
 ---
 
+## 📸 Screenshots
+
+| Home — all tools | Clean Scan in action |
+|:---:|:---:|
+| ![Home page](screenshots/home.png) | ![Clean Scan result](screenshots/clean-scan.png) |
+
+> _Drop your own PNG screenshots into the `screenshots/` folder using these exact names and they'll appear here automatically._
+
+---
+
 ## ✨ Features
 
 | Tool | What it does |
