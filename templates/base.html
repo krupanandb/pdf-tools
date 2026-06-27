@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}PDF Tools{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/" class="nav-logo">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <rect width="28" height="28" rx="6" fill="#e74c3c"/>
+        <path d="M8 7h8l5 5v9a1 1 0 01-1 1H8a1 1 0 01-1-1V8a1 1 0 011-1z" fill="white" opacity="0.9"/>
+        <path d="M16 7l5 5h-4a1 1 0 01-1-1V7z" fill="white" opacity="0.6"/>
+        <text x="9" y="18" font-size="5" font-weight="bold" fill="#e74c3c" font-family="Arial">PDF</text>
+      </svg>
+      <span>PDF Tools</span>
+    </a>
+    <span class="nav-tagline">Your private, offline PDF toolkit</span>
+  </nav>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <p>100% local &amp; private — your files never leave your computer</p>
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

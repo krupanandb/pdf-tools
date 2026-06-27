@@ -1,0 +1,7 @@
+flask
+PyMuPDF
+Pillow
+python-docx
+pywin32
+rembg
+onnxruntime

@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}{{ tool.name }} — PDF Tools{% endblock %}
+
+{% block content %}
+<div class="tool-page">
+
+  <div class="tool-header" style="--card-color: {{ tool.color }}">
+    <a href="/" class="back-link">← All Tools</a>
+    <h1>{{ tool.name }}</h1>
+    <p>{{ tool.desc }}</p>
+  </div>
+
+  <div class="tool-body">
+
+    {# ── Upload Zone ── #}
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput"
+             accept="{{ tool.accept }}"
+             {% if tool.multiple %}multiple{% endif %}
+             hidden>
+      <div class="upload-inner" id="uploadInner">
+        <div class="upload-icon-big">
+          <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+            <circle cx="28" cy="28" r="28" fill="{{ tool.color }}" opacity="0.08"/>
+            <path d="M28 36V22M22 28l6-6 6 6" stroke="{{ tool.color }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M18 38h20" stroke="{{ tool.color }}" stroke-width="2.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h3>Drop {% if tool.multiple %}files{% else %}file{% endif %} here</h3>
+        <p>or <button class="link-btn" onclick="document.getElementById('fileInput').click()">click to browse</button></p>
+        <span class="accepted-types">{{ tool.accept }}</span>
+      </div>
+    </div>
+
+    {# ── File List ── #}
+    <div class="file-list" id="fileList" hidden></div>
+
+    {# ── Tool-specific options ── #}
+    {% if tool.id == 'split' %}
+    <div class="options-box" id="optionsBox" hidden>
+      <h4>Split Options</h4>
+      <div class="option-row">
+        <label>
+          <input type="radio" name="splitMode" value="range" checked onchange="toggleSplitMode(this.value)">
+          Extract specific pages
+        </label>
+        <label>
+          <input type="radio" name="splitMode" value="all" onchange="toggleSplitMode(this.value)">
+          Split into individual pages (ZIP)
+        </label>
+      </div>
+      <div id="rangeInput" class="range-input">
+        <input type="text" id="pageRange" placeholder="e.g.  1-3, 5, 7-9">
+        <small>Separate pages with commas. Use dash for ranges.</small>
+      </div>
+    </div>
+
+    {% elif tool.id == 'compress' %}
+    <div class="options-box" id="optionsBox" hidden>
+      <h4>Compression Level</h4>
+      <div class="compress-levels">
+        <label class="level-card">
+          <input type="radio" name="compressLevel" value="low">
+          <div>
+            <strong>Low</strong>
+            <span>Basic compression, fastest</span>
+          </div>
+        </label>
+        <label class="level-card selected">
+          <input type="radio" name="compressLevel" value="medium" checked>
+          <div>
+            <strong>Medium</strong>
+            <span>Balanced size &amp; quality</span>
+          </div>
+        </label>
+        <label class="level-card">
+          <input type="radio" name="compressLevel" value="high">
+          <div>
+            <strong>High</strong>
+            <span>Maximum compression</span>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    {% elif tool.id == 'pdf-to-jpg' %}
+    <div class="options-box" id="optionsBox" hidden>
+      <h4>Image Quality</h4>
+      <div class="compress-levels">
+        <label class="level-card">
+          <input type="radio" name="dpi" value="96">
+          <div><strong>Screen</strong><span>96 DPI — small files</span></div>
+        </label>
+        <label class="level-card selected">
+          <input type="radio" name="dpi" value="150" checked>
+          <div><strong>Standard</strong><span>150 DPI — balanced</span></div>
+        </label>
+        <label class="level-card">
+          <input type="radio" name="dpi" value="300">
+          <div><strong>Print</strong><span>300 DPI — high quality</span></div>
+        </label>
+      </div>
+    </div>
+
+    {% elif tool.id == 'rotate' %}
+    <div class="options-box" id="optionsBox" hidden>
+      <h4>Rotation Angle</h4>
+      <div class="compress-levels">
+        <label class="level-card selected">
+          <input type="radio" name="degrees" value="90" checked>
+          <div><strong>90° CW</strong><span>Clockwise</span></div>
+        </label>
+        <label class="level-card">
+          <input type="radio" name="degrees" value="180">
+          <div><strong>180°</strong><span>Flip upside-down</span></div>
+        </label>
+        <label class="level-card">
+          <input type="radio" name="degrees" value="270">
+          <div><strong>90° CCW</strong><span>Counter-clockwise</span></div>
+        </label>
+      </div>
+      <div style="margin-top:14px">
+        <label class="option-label">Pages to rotate (leave empty for all pages)</label>
+        <div class="range-input" style="margin-top:6px">
+          <input type="text" id="rotatePageRange" placeholder="e.g.  1-3, 5, 7-9  (leave empty = all pages)">
+          <small>Separate pages with commas. Use dash for ranges.</small>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {# ── Reorder thumbnails ── #}
+    {% if tool.id == 'reorder' %}
+    <div id="reorderSection" hidden>
+      <div class="reorder-hint">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#888" stroke-width="1.5"/><path d="M8 5v3l2 2" stroke="#888" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Drag the pages below to reorder them, then click Download.
+      </div>
+      <div class="thumbnail-grid" id="thumbnailGrid"></div>
+    </div>
+    {% endif %}
+
+    {# ── Action button ── #}
+    <div class="action-bar" id="actionBar" hidden>
+      <button class="btn-startover" onclick="resetTool()" title="Clear and start over">
+        ↺ Start over
+      </button>
+      {% if tool.id == 'reorder' %}
+      <button class="btn-process" id="processBtn" style="--btn-color: {{ tool.color }}" onclick="processReorder()">
+        Download Reordered PDF
+      </button>
+      {% else %}
+      <button class="btn-process" id="processBtn" style="--btn-color: {{ tool.color }}" onclick="processFiles()">
+        {{ tool.name }}
+      </button>
+      {% endif %}
+    </div>
+
+    {# ── Progress ── #}
+    <div class="progress-bar-wrap" id="progressWrap" hidden>
+      <div class="progress-bar" id="progressBar"></div>
+      <span id="progressLabel">Processing…</span>
+    </div>
+
+    {# ── Result ── #}
+    <div class="result-box" id="resultBox" hidden>
+      <div class="result-icon">✓</div>
+      <h3>Done!</h3>
+      <p id="resultMsg">Your file is ready.</p>
+      <div class="result-preview" id="resultPreview" hidden>
+        <img id="resultPreviewImg" alt="Result preview">
+      </div>
+      <a id="downloadLink" class="btn-download" href="#" download>Download File</a>
+      <button class="btn-reset" onclick="resetTool()">Process Another File</button>
+    </div>
+
+    {# ── Error ── #}
+    <div class="error-box" id="errorBox" hidden>
+      <div class="error-icon">✕</div>
+      <h3>Something went wrong</h3>
+      <pre id="errorMsg"></pre>
+      <button class="btn-reset" onclick="resetTool()">Try Again</button>
+    </div>
+
+  </div><!-- .tool-body -->
+</div><!-- .tool-page -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const TOOL_ID    = "{{ tool.id }}";
+  const TOOL_COLOR = "{{ tool.color }}";
+  const MULTIPLE   = {{ 'true' if tool.multiple else 'false' }};
+</script>
+{% if tool.id == 'reorder' %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+{% endif %}
+{% endblock %}
