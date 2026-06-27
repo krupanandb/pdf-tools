@@ -696,39 +696,73 @@ def do_excel_to_pdf():
     return _send_results(results, zip_name='excel_pdfs.zip')
 
 
+def _pdf_to_docx_textonly(pdf_bytes):
+    """Fallback: plain text-block extraction (loses layout/tables/images)."""
+    from docx import Document
+    from docx.shared import Pt
+
+    pdf_doc  = fitz.open(stream=pdf_bytes, filetype='pdf')
+    word_doc = Document()
+    word_doc.styles['Normal'].font.size = Pt(11)
+
+    for page_num, page in enumerate(pdf_doc):
+        if page_num > 0:
+            word_doc.add_page_break()
+        blocks = sorted(page.get_text('blocks'), key=lambda b: (b[1], b[0]))
+        for block in blocks:
+            text = block[4].strip()
+            if text:
+                word_doc.add_paragraph(text)
+    pdf_doc.close()
+
+    buf = io.BytesIO()
+    word_doc.save(buf)
+    return buf.getvalue()
+
+
 def do_pdf_to_word():
     files = _get_files({'pdf'})
 
+    docx_mime = ('application/vnd.openxmlformats-officedocument'
+                 '.wordprocessingml.document')
+
     try:
-        from docx import Document
-        from docx.shared import Pt
+        from pdf2docx import Converter
+        have_pdf2docx = True
     except ImportError:
-        return jsonify({
-            'error': 'python-docx is not installed.\nRun: pip install python-docx'
-        }), 500
+        have_pdf2docx = False
 
     results = []
-    for f in files:
-        pdf_doc  = fitz.open(stream=f.read(), filetype='pdf')
-        word_doc = Document()
-        word_doc.styles['Normal'].font.size = Pt(11)
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        for idx, f in enumerate(files):
+            pdf_bytes = f.read()
+            out_bytes = None
 
-        for page_num, page in enumerate(pdf_doc):
-            if page_num > 0:
-                word_doc.add_page_break()
-            blocks = sorted(page.get_text('blocks'), key=lambda b: (b[1], b[0]))
-            for block in blocks:
-                text = block[4].strip()
-                if text:
-                    word_doc.add_paragraph(text)
-        pdf_doc.close()
+            if have_pdf2docx:
+                tmp_in  = os.path.join(tmp_dir, f'in_{idx}.pdf')
+                tmp_out = os.path.join(tmp_dir, f'out_{idx}.docx')
+                with open(tmp_in, 'wb') as pf:
+                    pf.write(pdf_bytes)
+                try:
+                    # Layout-aware conversion: keeps paragraphs, tables, fonts,
+                    # columns and images close to the original PDF.
+                    cv = Converter(tmp_in)
+                    cv.convert(tmp_out)
+                    cv.close()
+                    if os.path.exists(tmp_out):
+                        with open(tmp_out, 'rb') as of:
+                            out_bytes = of.read()
+                except Exception:
+                    out_bytes = None  # fall back below
 
-        buf = io.BytesIO()
-        word_doc.save(buf)
-        results.append((
-            f'{_stem(f.filename)}.docx', buf.getvalue(),
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        ))
+            if out_bytes is None:
+                # Either pdf2docx unavailable or it failed on this PDF.
+                out_bytes = _pdf_to_docx_textonly(pdf_bytes)
+
+            results.append((f'{_stem(f.filename)}.docx', out_bytes, docx_mime))
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return _send_results(results, zip_name='word_docs.zip')
 

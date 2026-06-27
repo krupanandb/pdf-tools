@@ -2,6 +2,7 @@ flask
 PyMuPDF
 Pillow
 python-docx
+pdf2docx
 pywin32
 rembg
 onnxruntime

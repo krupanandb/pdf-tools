@@ -3,7 +3,7 @@ echo ============================================
 echo   PDF Tools - Installing dependencies...
 echo ============================================
 echo.
-pip install flask PyMuPDF Pillow python-docx pywin32 rembg onnxruntime
+pip install flask PyMuPDF Pillow python-docx pdf2docx pywin32 rembg onnxruntime
 echo.
 echo ============================================
 echo   Installation complete!
