@@ -3,6 +3,7 @@ PyMuPDF
 Pillow
 python-docx
 pdf2docx
+fonttools
 pywin32
 rembg
 onnxruntime

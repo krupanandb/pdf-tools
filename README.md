@@ -23,6 +23,8 @@ A local web app that does everything the popular online PDF sites do — **merge
 | **Merge PDF** | Combine multiple PDFs into one |
 | **Split PDF** | Extract specific pages, or split every page into its own file |
 | **Reorder Pages** | Drag-and-drop page thumbnails to rearrange |
+| **Edit PDF** | Edit existing text (matches the original font), add text, whiteout, highlight, draw, and place signatures/images |
+| **Redact PDF** | Permanently remove sensitive text — true redaction (content is destroyed, not just covered), with find-and-redact across all pages |
 | **Rotate PDF** | Rotate all or selected pages 90° / 180° / 270° |
 | **Compress PDF** | Shrink file size (shows you how much was saved) |
 | **Optimize PDF** | Clean and streamline the PDF structure |

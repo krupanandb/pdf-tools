@@ -28,7 +28,9 @@
     <p>100% local &amp; private — your files never leave your computer</p>
   </footer>
 
+  {% block base_scripts %}
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  {% endblock %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

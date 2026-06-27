@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Edit PDF — PDF Tools{% endblock %}
+
+{% block content %}
+<div class="editor-wrap">
+
+  <div class="tool-header" style="--card-color:#e84393">
+    <a href="/" class="back-link">← All Tools</a>
+    <h1>Edit PDF</h1>
+    <p>Edit existing text, add new text, white-out content, and place signatures or images.</p>
+  </div>
+
+  {# ── Upload state ── #}
+  <div class="upload-zone" id="uploadZone">
+    <input type="file" id="fileInput" accept=".pdf" hidden>
+    <div class="upload-inner">
+      <div class="upload-icon-big">
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+          <circle cx="28" cy="28" r="28" fill="#e84393" opacity="0.08"/>
+          <path d="M28 36V22M22 28l6-6 6 6" stroke="#e84393" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M18 38h20" stroke="#e84393" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h3>Drop a PDF here</h3>
+      <p>or <button class="link-btn" onclick="document.getElementById('fileInput').click()">click to browse</button></p>
+      <span class="accepted-types">.pdf</span>
+    </div>
+  </div>
+
+  {# ── Loading ── #}
+  <div class="progress-bar-wrap" id="loadingWrap" hidden>
+    <div class="progress-bar"></div>
+    <span id="loadingLabel">Loading document…</span>
+  </div>
+
+  {# ── Editor ── #}
+  <div id="editorMain" hidden>
+
+    <div class="editor-toolbar" id="editorToolbar">
+      <div class="tool-group">
+        <button class="ed-tool active" data-tool="select" title="Select & move">
+          <span class="ed-ico">⤢</span> Select
+        </button>
+        <button class="ed-tool" data-tool="edittext" title="Edit existing text">
+          <span class="ed-ico">✎</span> Edit text
+        </button>
+        <button class="ed-tool" data-tool="text" title="Add new text">
+          <span class="ed-ico">T</span> Add text
+        </button>
+        <button class="ed-tool" data-tool="whiteout" title="White-out / erase">
+          <span class="ed-ico">▢</span> Whiteout
+        </button>
+        <button class="ed-tool" data-tool="highlight" title="Highlight">
+          <span class="ed-ico">🖍</span> Highlight
+        </button>
+        <button class="ed-tool" data-tool="draw" title="Freehand draw">
+          <span class="ed-ico">✏</span> Draw
+        </button>
+        <button class="ed-tool" data-tool="image" title="Add signature / image">
+          <span class="ed-ico">🖋</span> Sign / Image
+        </button>
+      </div>
+
+      <div class="tool-group">
+        <label class="ed-field" title="Text size">
+          A
+          <input type="number" id="fontSize" value="14" min="6" max="96" step="1">
+        </label>
+        <label class="ed-field" title="Text colour">
+          <input type="color" id="fontColor" value="#000000">
+        </label>
+        <button class="ed-style" id="styBold" title="Bold" style="font-weight:700">B</button>
+        <button class="ed-style" id="styItalic" title="Italic" style="font-style:italic">I</button>
+        <button class="ed-style" id="styUnder" title="Underline" style="text-decoration:underline">U</button>
+        <button class="ed-style" id="styStrike" title="Strikethrough" style="text-decoration:line-through">S</button>
+      </div>
+
+      <div class="tool-group ed-actions">
+        <button class="btn-startover" id="undoBtn" title="Undo last addition" disabled>↶ Undo</button>
+        <button class="btn-startover" id="deleteSelBtn" title="Delete selected" disabled>🗑 Delete</button>
+        <button class="btn-startover" onclick="location.reload()">↺ Start over</button>
+        <button class="btn-process" id="saveBtn" style="--btn-color:#e84393" onclick="saveEdits()">
+          Save PDF
+        </button>
+      </div>
+    </div>
+
+    <div class="editor-hint" id="editorHint">
+      <strong>Select</strong> tool active — click an item to move it. Switch tools above to edit text, add text, whiteout, or place a signature.
+    </div>
+
+    <input type="file" id="imageInput" accept=".png,.jpg,.jpeg,.webp" hidden>
+
+    <div class="pages-canvas" id="pagesCanvas"></div>
+
+    <div class="action-bar" style="margin-bottom:40px">
+      <button class="btn-process" style="--btn-color:#e84393" onclick="saveEdits()">Save PDF</button>
+    </div>
+  </div>
+
+  {# ── Result ── #}
+  <div class="result-box" id="resultBox" hidden>
+    <div class="result-icon">✓</div>
+    <h3>Saved!</h3>
+    <p id="resultMsg">Your edited PDF is ready.</p>
+    <a id="downloadLink" class="btn-download" href="#" download>Download Edited PDF</a>
+    <button class="btn-reset" onclick="location.reload()">Edit Another PDF</button>
+  </div>
+
+  {# ── Error ── #}
+  <div class="error-box" id="errorBox" hidden>
+    <div class="error-icon">✕</div>
+    <h3>Something went wrong</h3>
+    <pre id="errorMsg"></pre>
+    <button class="btn-reset" onclick="location.reload()">Try Again</button>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block base_scripts %}{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+{% endblock %}

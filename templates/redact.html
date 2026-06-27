@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Redact PDF — PDF Tools{% endblock %}
+
+{% block content %}
+<div class="editor-wrap">
+
+  <div class="tool-header" style="--card-color:#1f2937">
+    <a href="/" class="back-link">← All Tools</a>
+    <h1>Redact PDF</h1>
+    <p>Permanently remove sensitive information. The content is destroyed, not just covered.</p>
+  </div>
+
+  <div class="redact-warning">
+    🔒 <strong>True redaction.</strong> Text and images under each black box are
+    permanently deleted from the file — they cannot be copied or recovered.
+  </div>
+
+  {# ── Upload ── #}
+  <div class="upload-zone" id="uploadZone">
+    <input type="file" id="fileInput" accept=".pdf" hidden>
+    <div class="upload-inner">
+      <div class="upload-icon-big">
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+          <circle cx="28" cy="28" r="28" fill="#1f2937" opacity="0.08"/>
+          <path d="M28 36V22M22 28l6-6 6 6" stroke="#1f2937" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M18 38h20" stroke="#1f2937" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h3>Drop a PDF here</h3>
+      <p>or <button class="link-btn" onclick="document.getElementById('fileInput').click()">click to browse</button></p>
+      <span class="accepted-types">.pdf</span>
+    </div>
+  </div>
+
+  {# ── Loading ── #}
+  <div class="progress-bar-wrap" id="loadingWrap" hidden>
+    <div class="progress-bar"></div>
+    <span id="loadingLabel">Loading document…</span>
+  </div>
+
+  {# ── Redactor ── #}
+  <div id="editorMain" hidden>
+
+    <div class="editor-toolbar">
+      <div class="tool-group" style="flex:1; min-width:260px">
+        <label class="ed-field" style="flex:1" title="Find & redact text">
+          🔍
+          <input type="text" id="searchTerms" placeholder="Find &amp; redact words — e.g.  John Doe, ABCDE1234F"
+                 style="border:none;outline:none;width:100%;font-size:0.85rem">
+        </label>
+        <button class="btn-startover" id="findBtn">Mark matches</button>
+      </div>
+
+      <div class="tool-group ed-actions">
+        <span class="redact-count" id="redactCount">0 marked</span>
+        <button class="btn-startover" id="undoBtn" title="Remove last mark" disabled>↶ Undo</button>
+        <button class="btn-startover" onclick="location.reload()">↺ Start over</button>
+        <button class="btn-process" id="applyBtn" style="--btn-color:#1f2937" onclick="applyRedactions()">
+          Apply &amp; Download
+        </button>
+      </div>
+    </div>
+
+    <div class="editor-hint" id="editorHint">
+      <strong>Drag</strong> across anything sensitive to mark it for redaction, or type words above and click <strong>Mark matches</strong>. Click <strong>Apply</strong> when done.
+    </div>
+
+    <div class="pages-canvas" id="pagesCanvas"></div>
+  </div>
+
+  {# ── Result ── #}
+  <div class="result-box" id="resultBox" hidden>
+    <div class="result-icon">✓</div>
+    <h3>Redacted!</h3>
+    <p id="resultMsg">Your redacted PDF is ready.</p>
+    <a id="downloadLink" class="btn-download" href="#" download>Download Redacted PDF</a>
+    <button class="btn-reset" onclick="location.reload()">Redact Another PDF</button>
+  </div>
+
+  {# ── Error ── #}
+  <div class="error-box" id="errorBox" hidden>
+    <div class="error-icon">✕</div>
+    <h3>Something went wrong</h3>
+    <pre id="errorMsg"></pre>
+    <button class="btn-reset" onclick="location.reload()">Try Again</button>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block base_scripts %}{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/redact.js') }}"></script>
+{% endblock %}

@@ -1,7 +1,9 @@
 import os
 import io
 import re
+import json
 import uuid
+import hashlib
 import time
 import shutil
 import tempfile
@@ -107,6 +109,20 @@ TOOLS = [
         'desc': 'Extract PDF text and content into a Word document',
         'accept': '.pdf', 'multiple': True, 'category': 'convert',
     },
+    {
+        'id': 'edit', 'name': 'Edit PDF', 'icon': 'edit',
+        'color': '#e84393', 'bg': '#fdf2f8',
+        'desc': 'Edit existing text, add text, whiteout & place signatures',
+        'accept': '.pdf', 'multiple': False, 'category': 'organize',
+        'custom_url': '/editor',
+    },
+    {
+        'id': 'redact', 'name': 'Redact PDF', 'icon': 'redact',
+        'color': '#1f2937', 'bg': '#f3f4f6',
+        'desc': 'Permanently remove sensitive text — true redaction, not just black boxes',
+        'accept': '.pdf', 'multiple': False, 'category': 'organize',
+        'custom_url': '/redact',
+    },
 ]
 
 TOOL_MAP = {t['id']: t for t in TOOLS}
@@ -123,7 +139,320 @@ def tool(tool_id):
     t = TOOL_MAP.get(tool_id)
     if not t:
         return redirect(url_for('index'))
+    if t.get('custom_url'):
+        return redirect(t['custom_url'])
     return render_template('tool.html', tool=t)
+
+
+@app.route('/editor')
+def editor():
+    return render_template('editor.html')
+
+
+@app.route('/redact')
+def redact_page():
+    return render_template('redact.html')
+
+
+@app.route('/api/redact/apply', methods=['POST'])
+def redact_apply():
+    """Permanently remove content under each box and every match of the search
+    terms, then fill black. Uses PyMuPDF redaction so the underlying text and
+    images are truly destroyed — not merely covered."""
+    session_id = request.form.get('session_id', '').strip()
+    payload    = request.form.get('payload', '')
+    terms_raw  = request.form.get('terms', '')
+
+    if session_id:
+        _validate_session_id(session_id)
+        pdf_path = os.path.join(TEMP_DIR, session_id, 'input.pdf')
+        if not os.path.exists(pdf_path):
+            return jsonify({'error': 'Session expired — please re-upload the file'}), 400
+        doc = fitz.open(pdf_path)
+    else:
+        f = request.files.get('files')
+        if not f:
+            return jsonify({'error': 'No file uploaded'}), 400
+        _validate_ext(f.filename, {'pdf'})
+        doc = fitz.open(stream=f.read(), filetype='pdf')
+
+    try:
+        boxes = json.loads(payload) if payload else []
+    except json.JSONDecodeError:
+        boxes = []
+
+    count = 0
+    touched = set()
+
+    # ── User-drawn boxes ──
+    for op in boxes:
+        pidx = op.get('page', 0)
+        if not (0 <= pidx < doc.page_count):
+            continue
+        page = doc[pidx]
+        pw, ph = page.rect.width, page.rect.height
+        rect = fitz.Rect(op['x'] * pw, op['y'] * ph,
+                         (op['x'] + op['w']) * pw, (op['y'] + op['h']) * ph)
+        if rect.is_empty or rect.width < 1 or rect.height < 1:
+            continue
+        page.add_redact_annot(rect, fill=(0, 0, 0))
+        touched.add(pidx)
+        count += 1
+
+    # ── Find & redact every occurrence of each search term ──
+    terms = [t.strip() for t in re.split(r'[\n,]', terms_raw) if t.strip()]
+    if terms:
+        for pidx, page in enumerate(doc):
+            for term in terms:
+                for rect in page.search_for(term):
+                    page.add_redact_annot(rect, fill=(0, 0, 0))
+                    touched.add(pidx)
+                    count += 1
+
+    if count == 0:
+        doc.close()
+        return jsonify({'error': 'Nothing to redact — draw a box or enter a '
+                                 'search term first.'}), 400
+
+    # ── Apply: this is the step that permanently removes the content ──
+    for pidx in touched:
+        page = doc[pidx]
+        try:
+            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+        except (AttributeError, TypeError):
+            page.apply_redactions()
+
+    output = io.BytesIO()
+    doc.save(output, garbage=4, deflate=True)
+    doc.close()
+
+    if session_id:
+        shutil.rmtree(os.path.join(TEMP_DIR, session_id), ignore_errors=True)
+
+    output.seek(0)
+    resp = send_file(output, mimetype='application/pdf',
+                     as_attachment=True, download_name='redacted.pdf')
+    resp.headers['X-Redaction-Count'] = str(count)
+    return resp
+
+
+EDIT_RENDER_SCALE = 2.0  # 144 DPI render for a crisp editing canvas
+
+
+@app.route('/api/edit/load', methods=['POST'])
+def edit_load():
+    """Upload a PDF: render each page to a PNG and extract editable text spans.
+    Coordinates are returned normalized (0..1) so the front-end is resolution
+    independent."""
+    f = request.files.get('files')
+    if not f:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    _validate_ext(f.filename, {'pdf'})
+    _cleanup_old_sessions()
+
+    session_id = str(uuid.uuid4())
+    session_dir = os.path.join(TEMP_DIR, session_id)
+    os.makedirs(session_dir)
+    pdf_path = os.path.join(session_dir, 'input.pdf')
+    f.save(pdf_path)
+
+    doc = fitz.open(pdf_path)
+    mat = fitz.Matrix(EDIT_RENDER_SCALE, EDIT_RENDER_SCALE)
+    pages = []
+
+    for page in doc:
+        pw, ph = page.rect.width, page.rect.height
+        pix = page.get_pixmap(matrix=mat)
+        img_b64 = base64.b64encode(pix.tobytes('png')).decode()
+
+        spans = []
+        data = page.get_text('dict')
+        for block in data.get('blocks', []):
+            if block.get('type') != 0:
+                continue
+            for line in block.get('lines', []):
+                for span in line.get('spans', []):
+                    text = span.get('text', '')
+                    if not text.strip():
+                        continue
+                    x0, y0, x1, y1 = span['bbox']
+                    c = span.get('color', 0)
+                    flags = span.get('flags', 0)
+                    spans.append({
+                        'text': text,
+                        'x': x0 / pw, 'y': y0 / ph,
+                        'w': (x1 - x0) / pw, 'h': (y1 - y0) / ph,
+                        'size': span.get('size', 11),
+                        'color': '#%02x%02x%02x' % ((c >> 16) & 255, (c >> 8) & 255, c & 255),
+                        'font': span.get('font', ''),
+                        # Style flags (PyMuPDF span flag bits)
+                        'italic': bool(flags & 2),
+                        'serif':  bool(flags & 4),
+                        'mono':   bool(flags & 8),
+                        'bold':   bool(flags & 16),
+                    })
+
+        pages.append({
+            'image': img_b64,
+            'width_pt': pw,
+            'height_pt': ph,
+            'spans': spans,
+        })
+
+    doc.close()
+    return jsonify({'session_id': session_id, 'pages': pages})
+
+
+@app.route('/api/edit/save', methods=['POST'])
+def edit_save():
+    """Apply edit operations and return the final flattened PDF.
+
+    operations: list of dicts, each with 'page' index and 'type':
+      - 'edit'     : replace an existing text span (redact + reinsert)
+      - 'text'     : add new text
+      - 'whiteout' : cover a rectangle with white
+      - 'image'    : place an uploaded image
+    All rect coords are normalized (0..1) relative to the page.
+    """
+    payload = request.form.get('payload')
+    session_id = request.form.get('session_id', '').strip()
+    if not payload:
+        return jsonify({'error': 'Missing edit data'}), 400
+
+    try:
+        ops = json.loads(payload)
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Invalid edit data'}), 400
+
+    if session_id:
+        _validate_session_id(session_id)
+        pdf_path = os.path.join(TEMP_DIR, session_id, 'input.pdf')
+        if not os.path.exists(pdf_path):
+            return jsonify({'error': 'Session expired — please re-upload the file'}), 400
+        doc = fitz.open(pdf_path)
+    else:
+        f = request.files.get('files')
+        if not f:
+            return jsonify({'error': 'No file uploaded'}), 400
+        _validate_ext(f.filename, {'pdf'})
+        doc = fitz.open(stream=f.read(), filetype='pdf')
+
+    # Uploaded images for 'image' ops, keyed by the id used in the payload.
+    images = {}
+    for key in request.files:
+        if key.startswith('img_'):
+            images[key] = request.files[key].read()
+
+    def _rgb(hex_str):
+        h = (hex_str or '#000000').lstrip('#')
+        if len(h) != 6:
+            return (0, 0, 0)
+        return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+    # ── Pass 1: redactions (must be applied before drawing new content) ──
+    pages_needing_redaction = set()
+    for op in ops:
+        if op.get('type') in ('edit', 'whiteout'):
+            pidx = op.get('page', 0)
+            if 0 <= pidx < doc.page_count:
+                page = doc[pidx]
+                pw, ph = page.rect.width, page.rect.height
+                rect = fitz.Rect(op['x'] * pw, op['y'] * ph,
+                                 (op['x'] + op['w']) * pw, (op['y'] + op['h']) * ph)
+                page.add_redact_annot(rect, fill=(1, 1, 1))
+                pages_needing_redaction.add(pidx)
+
+    for pidx in pages_needing_redaction:
+        doc[pidx].apply_redactions()
+
+    # ── Pass 2: add new text and images ──
+    for op in ops:
+        t = op.get('type')
+        pidx = op.get('page', 0)
+        if not (0 <= pidx < doc.page_count):
+            continue
+        page = doc[pidx]
+        pw, ph = page.rect.width, page.rect.height
+
+        if t in ('edit', 'text'):
+            text = op.get('text', '')
+            if not text:
+                continue
+            size = float(op.get('size', 11))
+            color = _rgb(op.get('color', '#000000'))
+            fontname, fontfile = _resolve_font(op)
+            x0 = op['x'] * pw
+            y0 = op['y'] * ph
+            y1 = (op['y'] + op['h']) * ph if op.get('h') else y0 + size * 1.2
+            # Insert with room to the right edge so longer replacements fit.
+            rect = fitz.Rect(x0, y0, pw - 4, max(y1, y0 + size * 1.3))
+            kw = dict(fontsize=size, fontname=fontname, color=color)
+            if fontfile:
+                kw['fontfile'] = fontfile
+            rc = page.insert_textbox(rect, text, align=0, **kw)
+            if rc < 0:
+                page.insert_text((x0, y1 - size * 0.2), text, **kw)
+
+            # underline / strikethrough (drawn lines, since PDFs store them so)
+            if op.get('underline') or op.get('strike'):
+                try:
+                    if fontfile:
+                        tw = fitz.Font(fontfile=fontfile).text_length(text, size)
+                    else:
+                        tw = fitz.get_text_length(text, fontname=fontname, fontsize=size)
+                except Exception:
+                    tw = size * 0.5 * len(text)
+                lw = max(0.5, size * 0.06)
+                if op.get('underline'):
+                    uy = y0 + size * 1.02
+                    page.draw_line((x0, uy), (x0 + tw, uy), color=color, width=lw)
+                if op.get('strike'):
+                    sy = y0 + size * 0.62
+                    page.draw_line((x0, sy), (x0 + tw, sy), color=color, width=lw)
+
+        elif t == 'highlight':
+            rect = fitz.Rect(op['x'] * pw, op['y'] * ph,
+                             (op['x'] + op['w']) * pw, (op['y'] + op['h']) * ph)
+            try:
+                page.draw_rect(rect, color=None, fill=_rgb(op.get('color', '#ffeb3b')),
+                               fill_opacity=0.35, stroke_opacity=0)
+            except TypeError:
+                # Older PyMuPDF without opacity kwargs — use a highlight annot.
+                page.add_highlight_annot(rect)
+
+        elif t == 'draw':
+            pts = op.get('points', [])
+            if len(pts) >= 2:
+                points = [fitz.Point(px * pw, py * ph) for px, py in pts]
+                try:
+                    page.draw_polyline(points, color=_rgb(op.get('color', '#000000')),
+                                       width=float(op.get('width', 2)))
+                except Exception:
+                    pass
+
+        elif t == 'image':
+            img_key = op.get('img')
+            if img_key not in images:
+                continue
+            rect = fitz.Rect(op['x'] * pw, op['y'] * ph,
+                             (op['x'] + op['w']) * pw, (op['y'] + op['h']) * ph)
+            try:
+                page.insert_image(rect, stream=images[img_key], keep_proportion=True)
+            except Exception:
+                pass
+
+    output = io.BytesIO()
+    doc.save(output, garbage=3, deflate=True)
+    doc.close()
+
+    if session_id:
+        shutil.rmtree(os.path.join(TEMP_DIR, session_id), ignore_errors=True)
+
+    output.seek(0)
+    return send_file(output, mimetype='application/pdf',
+                     as_attachment=True, download_name='edited.pdf')
 
 
 @app.route('/api/process/<tool_id>', methods=['POST'])
@@ -779,6 +1108,90 @@ def _validate_session_id(sid):
     """Raise ValueError if sid is not a valid v4 UUID (prevents path traversal)."""
     if not sid or not _UUID_RE.match(sid):
         raise ValueError('Invalid session ID')
+
+
+_FONT_INDEX = None
+
+
+def _font_index():
+    """Scan installed fonts once, mapping family name → style variants → file.
+    Lets the editor reproduce the exact installed font (Calibri, Arial, etc.)."""
+    global _FONT_INDEX
+    if _FONT_INDEX is not None:
+        return _FONT_INDEX
+
+    from fontTools.ttLib import TTFont
+    dirs = [
+        os.path.join(os.environ.get('WINDIR', r'C:\Windows'), 'Fonts'),
+        os.path.join(os.environ.get('LOCALAPPDATA', ''),
+                     'Microsoft', 'Windows', 'Fonts'),
+    ]
+    index = {}
+    for d in dirs:
+        if not d or not os.path.isdir(d):
+            continue
+        for fn in os.listdir(d):
+            ext = fn.lower().rsplit('.', 1)[-1]
+            if ext not in ('ttf', 'otf'):
+                continue
+            path = os.path.join(d, fn)
+            try:
+                tt = TTFont(path, fontNumber=0, lazy=True)
+                family = (tt['name'].getDebugName(1) or '').strip()
+                sub = (tt['name'].getDebugName(2) or '').lower()
+                bold = 'bold' in sub
+                italic = 'italic' in sub or 'oblique' in sub
+                try:
+                    mac = tt['head'].macStyle
+                    bold = bold or bool(mac & 1)
+                    italic = italic or bool(mac & 2)
+                except Exception:
+                    pass
+                tt.close()
+                if not family:
+                    continue
+                key = re.sub(r'[^a-z]', '', family.lower())
+                index.setdefault(key, []).append(
+                    {'bold': bold, 'italic': italic, 'path': path})
+            except Exception:
+                pass
+    _FONT_INDEX = index
+    return index
+
+
+def _base14_font(op):
+    """Fallback: nearest standard font for the detected style category."""
+    b = 1 if op.get('bold') else 0
+    i = 1 if op.get('italic') else 0
+    if op.get('mono'):
+        return {(0, 0): 'cour', (1, 0): 'cobo', (0, 1): 'coit', (1, 1): 'cobi'}[(b, i)]
+    if op.get('serif'):
+        return {(0, 0): 'tiro', (1, 0): 'tibo', (0, 1): 'tiit', (1, 1): 'tibi'}[(b, i)]
+    return {(0, 0): 'helv', (1, 0): 'hebo', (0, 1): 'heit', (1, 1): 'hebi'}[(b, i)]
+
+
+def _resolve_font(op):
+    """Return (fontname_tag, fontfile_path). If the original font is installed,
+    embed it for an exact match; otherwise fall back to a standard font."""
+    raw = op.get('font') or ''
+    if '+' in raw:               # strip subset prefix e.g. "ABCDEF+Calibri"
+        raw = raw.split('+', 1)[1]
+    clean = re.sub(r'[^a-z]', '', raw.lower())
+    bold = bool(op.get('bold'))
+    italic = bool(op.get('italic'))
+
+    if clean:
+        idx = _font_index()
+        # longest family name that is contained in the PDF font name wins
+        cands = [fam for fam in idx if fam and fam in clean]
+        if cands:
+            fam = max(cands, key=len)
+            best = max(idx[fam],
+                       key=lambda v: (v['bold'] == bold) + (v['italic'] == italic))
+            tag = 'F' + hashlib.md5(best['path'].encode()).hexdigest()[:10]
+            return tag, best['path']
+
+    return _base14_font(op), None
 
 
 def _validate_ext(filename, allowed_exts):
